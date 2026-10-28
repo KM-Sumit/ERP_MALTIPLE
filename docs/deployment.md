@@ -8,7 +8,7 @@ Push the project to GitHub, then in Render choose **New → Blueprint** and sele
 
 Render fills `DATABASE_URL` with the database owner. `scripts/render-db.mjs` creates `erp_app` before migrations. The running app uses that login when `ERP_APP_PASSWORD` is set, so row-level security stays on. Render generates that password. Do not paste it into the repo.
 
-The service plan is Starter and the database plan is Basic, because a free web service has no disk and would drop uploaded photos on the next deploy. `FILE_STORAGE_PATH` is `/var/data/uploads`. `BODY_SIZE_LIMIT` is `6M`. Render terminates HTTPS. `PROTOCOL_HEADER` is `x-forwarded-proto`.
+The blueprint uses the free web service and the free Postgres plan. Free Postgres expires 30 days after creation. The free web service sleeps after 15 minutes without a visitor, and uploaded files in `/tmp/uploads` are deleted when it sleeps. `BODY_SIZE_LIMIT` is `6M`. Render terminates HTTPS. `PROTOCOL_HEADER` is `x-forwarded-proto`.
 
 After the first deploy, open `https://<service>.onrender.com/health`. It should return `{"ok":true}`. Then open `/setup` once and create the Super Admin. There is no Super Admin until that form is saved. Cashfree, email, and SMS stay off until those providers are connected.
 

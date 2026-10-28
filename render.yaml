@@ -1,12 +1,10 @@
-# Render Blueprint. Connect this repo, then use New > Blueprint.
-# The web service is a paid Starter because photo uploads need a persistent disk.
-# The database owner URL stays in DATABASE_URL for migrations. The app rewrites
-# that URL to the erp_app login using ERP_APP_PASSWORD.
+# Free Render Blueprint. Free Postgres expires 30 days after creation.
+# Free web services have no disk, so uploaded files disappear when the service sleeps.
 services:
   - type: web
     name: school-erp
     runtime: node
-    plan: starter
+    plan: free
     region: singapore
     buildCommand: npm install --include=dev && npm run build
     preDeployCommand: node scripts/render-db.mjs && npm run db:migrate
@@ -24,14 +22,10 @@ services:
       - key: PROTOCOL_HEADER
         value: x-forwarded-proto
       - key: FILE_STORAGE_PATH
-        value: /var/data/uploads
-    disk:
-      name: uploads
-      mountPath: /var/data
-      sizeGB: 1
+        value: /tmp/uploads
 
 databases:
   - name: school-erp-db
-    plan: basic-256mb
+    plan: free
     region: singapore
     databaseName: school_erp
