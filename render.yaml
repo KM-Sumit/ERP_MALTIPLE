@@ -1,0 +1,37 @@
+# Render Blueprint. Connect this repo, then use New > Blueprint.
+# The web service is a paid Starter because photo uploads need a persistent disk.
+# The database owner URL stays in DATABASE_URL for migrations. The app rewrites
+# that URL to the erp_app login using ERP_APP_PASSWORD.
+services:
+  - type: web
+    name: school-erp
+    runtime: node
+    plan: starter
+    region: singapore
+    buildCommand: npm install --include=dev && npm run build
+    preDeployCommand: node scripts/render-db.mjs && npm run db:migrate
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: school-erp-db
+          property: connectionString
+      - key: ERP_APP_PASSWORD
+        generateValue: true
+      - key: BODY_SIZE_LIMIT
+        value: 6M
+      - key: PROTOCOL_HEADER
+        value: x-forwarded-proto
+      - key: FILE_STORAGE_PATH
+        value: /var/data/uploads
+    disk:
+      name: uploads
+      mountPath: /var/data
+      sizeGB: 1
+
+databases:
+  - name: school-erp-db
+    plan: basic-256mb
+    region: singapore
+    databaseName: school_erp

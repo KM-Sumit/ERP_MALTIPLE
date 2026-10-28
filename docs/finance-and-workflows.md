@@ -1,0 +1,15 @@
+# Fees, payments, and school workflows
+
+Fee amounts are stored in paise. A fee plan belongs to one academic session and one charge category: tuition, admission, transport, examination, or other. Schedules are monthly, quarterly, half-yearly, or annual. School Admins, and anyone granted `fees.configure` or `school.fees.manage`, save plans, holidays, concessions, and invoices. Recording cash and approving refunds requires `payments.record` or `school.fees.manage`. Manager accounts have no financial permissions until a School Admin grants them on that membership.
+
+Issuing an invoice copies the late-fee policy onto the invoice. Later edits to the plan do not change invoices already issued. The stored late fee is recalculated from that snapshot when a payment is recorded. Grace days are the first calendar days after the due date and are not charged. When the plan counts working days, only the school's working weekdays that are not holidays are charged. A fixed or one-time policy charges its amount once any chargeable day exists. A percent policy is `floor(outstanding principal × percent / 100)` once, capped by the plan maximum, and it does not compound on earlier late fees. Nothing is charged on the due date.
+
+Payments lock the invoice, reject an amount above the outstanding balance, and keep `amount_paid` within the payable total. Repeating the same manual reference returns the original payment. Cashfree is confirmed only by `POST /api/payments/webhook`. The route checks `x-webhook-signature`, the base64 HMAC-SHA256 of `x-webhook-timestamp` plus the raw body, using `CASHFREE_SECRET_KEY`. A missing secret returns 503 and does not mark anything paid. A duplicate event id returns 200 without a second credit. Refunds are separate rows; the original payment stays succeeded and the invoice balance is reduced.
+
+Parents see issued invoices, concessions, due dates, late fees, receipts, and payment history for linked children. A pending online payment is not a receipt.
+
+Complaints move `open` → `in_review` → `assigned` → `resolved`, and a resolved complaint can return to `in_review`. Uploads are checked from file bytes, limited to 5 MB and 20 files an hour, and stored under `FILE_STORAGE_PATH` or `.local/uploads` at `schools/{schoolId}/files/{fileId}`. Downloads require a school session. JPEG, PNG, PDF, WAV, and WebM are accepted. No malware scanner is configured.
+
+Document requests use the types the school enters, including bonafide, transfer, fee certificate, and ID requests. Approval or rejection requires `documents.approve` or `school.documents.manage`, stores a reason, and a ready request can be downloaded as a one-page PDF. Each download is logged.
+
+Notifications are stored in the school inbox. Email, SMS, push, and WhatsApp are not sent because those providers are not configured. Repeating the same `event_key` for one user does not create a second row. Parents can read published course notes for their child's section. Draft courses stay with staff who teach or manage classes.
