@@ -1,4 +1,5 @@
 import { error } from '@sveltejs/kit';
+import { teacherRoster } from '#lib/server/schools/directory';
 import { ASSIGNABLE_PERMISSIONS } from '#lib/permissions';
 import {
 	assignManagerPermissions,
@@ -14,8 +15,11 @@ export const load: PageServerLoad = async ({ locals }) => {
 	const allowed = ['users.manage', 'school.members.manage', 'roles.assign'];
 	if (!allowed.some((key) => locals.permissions.includes(key)))
 		error(403, 'Staff management is not available.');
-	const staff = await listStaff(getDb(), locals.userId!, locals.schoolId!);
-	return { ...staff, permissions: ASSIGNABLE_PERMISSIONS };
+	const [staff, teachers] = await Promise.all([
+		listStaff(getDb(), locals.userId!, locals.schoolId!),
+		teacherRoster(getDb(), locals.userId!, locals.schoolId!)
+	]);
+	return { ...staff, teachers, permissions: ASSIGNABLE_PERMISSIONS };
 };
 
 export const actions: Actions = {

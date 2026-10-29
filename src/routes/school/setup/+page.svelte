@@ -49,7 +49,6 @@
 		<Field label="End date" name="endDate" type="date" required />
 	{:else if step === 'classes'}
 		<Field label="Class name" name="className" required />
-		<Field label="Grade level" name="gradeLevel" type="number" min="0" max="20" required />
 		<Field label="Section" name="sectionName" required />
 		<Field label="Subject" name="subjectName" required />
 		<Field label="Subject code" name="subjectCode" required />

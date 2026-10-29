@@ -14,7 +14,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 	if (!locals.userId) redirect(303, '/login');
 	const home = locals.isPlatformAdmin
 		? '/admin'
-		: locals.roleKey === 'parent'
+		: locals.roleKey === 'parent' || locals.roleKey === 'student'
 			? '/family'
 			: locals.roleKey === 'teacher'
 				? '/teach'

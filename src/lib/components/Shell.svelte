@@ -8,12 +8,14 @@
 		userName,
 		links,
 		tabs = links,
+		mark = 'ERP',
 		children
 	}: {
 		title: string;
 		userName: string;
 		links: { href: string; label: string }[];
 		tabs?: { href: string; label: string }[];
+		mark?: string;
 		children: Snippet;
 	} = $props();
 
@@ -58,9 +60,9 @@
 				</p>
 			</div>
 			<div
-				class="grid h-12 w-12 shrink-0 place-items-center rounded-xl border border-emerald-100 bg-white text-[10px] leading-tight font-bold text-emerald-700"
+				class="grid max-w-28 min-h-12 shrink-0 place-items-center rounded-xl border border-emerald-100 bg-white px-2 py-1 text-center text-[10px] leading-tight font-bold break-words text-emerald-700"
 			>
-				ERP
+				{mark}
 			</div>
 		</header>
 		<p

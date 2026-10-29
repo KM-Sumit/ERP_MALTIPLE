@@ -1,4 +1,5 @@
 import { error } from '@sveltejs/kit';
+import { studentRoster } from '#lib/server/schools/directory';
 import { addStudent, linkGuardian, listPeople } from '#lib/server/schools/service';
 import { actionError } from '#lib/server/http/action';
 import { getDb } from '#lib/server/db';
@@ -11,19 +12,24 @@ export const load: PageServerLoad = async ({ locals }) => {
 	) {
 		error(403, 'Student records are not available.');
 	}
-	return listPeople(getDb(), locals.userId!, locals.schoolId!);
+	const [people, roster] = await Promise.all([
+		listPeople(getDb(), locals.userId!, locals.schoolId!),
+		studentRoster(getDb(), locals.userId!, locals.schoolId!)
+	]);
+	return { ...people, roster };
 };
 
 export const actions: Actions = {
 	student: async ({ request, locals }) => {
 		const form = await request.formData();
 		try {
-			await addStudent(getDb(), locals.userId!, locals.schoolId!, {
+			const created = await addStudent(getDb(), locals.userId!, locals.schoolId!, {
 				admissionNo: String(form.get('admissionNo') ?? ''),
 				firstName: String(form.get('firstName') ?? ''),
-				lastName: String(form.get('lastName') ?? '')
+				lastName: String(form.get('lastName') ?? ''),
+				email: String(form.get('email') ?? '')
 			});
-			return { saved: 'Student added.' };
+			return { saved: 'Student added.', studentInvitePath: `/invite/${created.token}` };
 		} catch (error) {
 			return actionError(error);
 		}

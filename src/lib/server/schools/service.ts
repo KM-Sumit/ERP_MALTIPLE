@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, or, sql } from 'drizzle-orm';
+import { and, desc, eq, ilike, isNull, or, sql } from 'drizzle-orm';
 import { isAssignablePermission } from '../../permissions';
 import { AuthError } from '../auth/service';
 import { hashToken, newToken } from '../auth/password';
@@ -13,6 +13,8 @@ import {
 	classes,
 	complaintAttachments,
 	complaints,
+	courseMaterials,
+	courses,
 	feeStructures,
 	guardianStudents,
 	membershipPermissions,
@@ -23,6 +25,8 @@ import {
 	schoolSettings,
 	schools,
 	sections,
+	sessionTimetableFiles,
+	studentEnrollments,
 	students,
 	subjects,
 	systemSettings,
@@ -55,7 +59,8 @@ const MANAGER_HOME_PERMISSIONS = [
 	'complaints.resolve',
 	'documents.approve',
 	'reports.export',
-	'school.settings.manage'
+	'school.settings.manage',
+	'school.records.manage'
 ] as const;
 
 function clean(value: unknown) {
@@ -122,6 +127,75 @@ export async function openSchool(
 			metadata: { seats, bill: input.bill }
 		});
 		return schoolId;
+	});
+}
+
+export async function openSchoolForPrincipal(
+	db: AppDb,
+	actorId: string,
+	input: { name: string; seats: string; email: string }
+) {
+	const email = input.email.trim().toLowerCase();
+	if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+		throw new AuthError('Enter the principal email.');
+	}
+	const schoolId = await openSchool(db, actorId, {
+		name: input.name,
+		seats: input.seats,
+		bill: 'unpaid'
+	});
+	const token = await provisionSchoolAdmin(db, actorId, schoolId, email, 'Principal');
+	return { schoolId, token };
+}
+
+export async function listSchoolBasics(db: AppDb, actorId: string) {
+	return withPlatformAdmin(db, actorId, async (tx) => {
+		const result = await tx.execute(sql`
+			select s.id, s.name, ss.student_limit,
+				(
+					select count(*)::int
+					from students st
+					where st.school_id = s.id and st.deleted_at is null
+				) as students
+			from schools s
+			join school_settings ss on ss.school_id = s.id
+			where s.deleted_at is null
+			order by s.name
+		`);
+		return rowsOf(result).map((row) => ({
+			id: String(row.id),
+			name: String(row.name),
+			studentLimit: row.student_limit == null ? null : Number(row.student_limit),
+			students: Number(row.students ?? 0)
+		}));
+	});
+}
+
+export async function updateSchoolBasics(
+	db: AppDb,
+	actorId: string,
+	schoolId: string,
+	input: { name: string; seats: string }
+) {
+	const name = clean(input.name);
+	if (name.length < 2 || name.length > 120) throw new AuthError('Enter the school name.');
+	const seats = Number(input.seats);
+	if (!Number.isInteger(seats) || seats < 1 || seats > 100000) {
+		throw new AuthError('Enter how many children this school can take.');
+	}
+	await withPlatformAdmin(db, actorId, async (tx) => {
+		const [school] = await tx.select().from(schools).where(eq(schools.id, schoolId));
+		if (!school || school.deletedAt) throw new AuthError('School not found.');
+		await tx.update(schools).set({ name }).where(eq(schools.id, schoolId));
+		await tx.execute(sql`select app.set_school_limits(${schoolId}::uuid, 'standard', ${seats})`);
+		await writeAudit(tx, {
+			schoolId,
+			actorUserId: actorId,
+			action: 'schools.update',
+			entityType: 'school',
+			entityId: schoolId,
+			metadata: { name, seats }
+		});
 	});
 }
 
@@ -444,10 +518,7 @@ export async function saveOnboardingStep(
 			if (!session) throw new AuthError('Create an academic session first.');
 			const className = clean(fields.className);
 			if (className) {
-				const grade = Number(fields.gradeLevel);
-				if (!Number.isInteger(grade) || grade < 0 || grade > 20) {
-					throw new AuthError('Grade level must be between 0 and 20.');
-				}
+				const grade = 0;
 				const [created] = await tx
 					.insert(classes)
 					.values({
@@ -537,10 +608,50 @@ export async function academicCatalog(db: AppDb, userId: string, schoolId: strin
 			sessions: await tx
 				.select()
 				.from(academicSessions)
-				.where(eq(academicSessions.schoolId, schoolId)),
+				.where(eq(academicSessions.schoolId, schoolId))
+				.orderBy(desc(academicSessions.createdAt)),
 			classes: await tx.select().from(classes).where(eq(classes.schoolId, schoolId)),
 			sections: await tx.select().from(sections).where(eq(sections.schoolId, schoolId)),
-			subjects: await tx.select().from(subjects).where(eq(subjects.schoolId, schoolId))
+			subjects: await tx.select().from(subjects).where(eq(subjects.schoolId, schoolId)),
+			students: await tx
+				.select({
+					sessionId: studentEnrollments.sessionId,
+					admissionNo: students.admissionNo,
+					firstName: students.firstName,
+					lastName: students.lastName,
+					sectionName: sections.name
+				})
+				.from(studentEnrollments)
+				.innerJoin(
+					students,
+					and(
+						eq(students.id, studentEnrollments.studentId),
+						eq(students.schoolId, studentEnrollments.schoolId)
+					)
+				)
+				.innerJoin(
+					sections,
+					and(
+						eq(sections.id, studentEnrollments.sectionId),
+						eq(sections.schoolId, studentEnrollments.schoolId)
+					)
+				)
+				.where(
+					and(
+						eq(studentEnrollments.schoolId, schoolId),
+						eq(studentEnrollments.status, 'active'),
+						isNull(students.deletedAt)
+					)
+				),
+			timetables: await tx
+				.select({
+					sessionId: sessionTimetableFiles.sessionId,
+					fileId: sessionTimetableFiles.fileId,
+					createdAt: sessionTimetableFiles.createdAt
+				})
+				.from(sessionTimetableFiles)
+				.where(eq(sessionTimetableFiles.schoolId, schoolId))
+				.orderBy(desc(sessionTimetableFiles.createdAt))
 		};
 	});
 }
@@ -578,10 +689,7 @@ export async function addAcademicStructure(
 			.limit(1);
 		if (input.className) {
 			if (!session) throw new AuthError('Create an academic session first.');
-			const grade = Number(input.gradeLevel);
-			if (!Number.isInteger(grade) || grade < 0 || grade > 20) {
-				throw new AuthError('Grade level must be between 0 and 20.');
-			}
+			const grade = 0;
 			const [created] = await tx
 				.insert(classes)
 				.values({
@@ -606,6 +714,423 @@ export async function addAcademicStructure(
 				code: clean(input.subjectCode).toLowerCase()
 			});
 		}
+	});
+}
+
+function studentLoginEmail(value: string) {
+	const email = clean(value).toLowerCase();
+	if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new AuthError('Enter the student email.');
+	return email;
+}
+
+async function inviteStudentLogin(
+	tx: TenantTx,
+	schoolId: string,
+	studentId: string,
+	email: string,
+	fullName: string
+) {
+	const token = newToken();
+	const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+	let created;
+	try {
+		created = await tx.execute(
+			sql`select app.invite_school_member(${schoolId}::uuid, ${email}, ${fullName}, 'student', ${hashToken(token)}, ${expires}) as user_id`
+		);
+	} catch (error) {
+		if (pgCode(error) === '23505') throw new AuthError('This email already has a student login.');
+		throw error;
+	}
+	const loginUserId = String(rowsOf(created)[0]?.user_id ?? '');
+	if (!loginUserId) throw new AuthError('Student login could not be created.');
+	await tx.insert(guardianStudents).values({
+		schoolId,
+		guardianUserId: loginUserId,
+		studentId,
+		relationship: 'self'
+	});
+	return token;
+}
+
+export async function addSessionStudent(
+	db: AppDb,
+	userId: string,
+	schoolId: string,
+	input: {
+		sessionId: string;
+		sectionId: string;
+		admissionNo: string;
+		firstName: string;
+		lastName: string;
+		email: string;
+	}
+) {
+	const email = studentLoginEmail(input.email);
+	const fullName = `${clean(input.firstName)} ${clean(input.lastName)}`.trim();
+	return withSchoolUser(db, userId, schoolId, async (tx) => {
+		await requirePermission(tx, schoolId, ['school.records.manage', 'users.manage']);
+		const [section] = await tx
+			.select({ id: sections.id })
+			.from(sections)
+			.innerJoin(
+				classes,
+				and(eq(classes.id, sections.classId), eq(classes.schoolId, sections.schoolId))
+			)
+			.where(
+				and(
+					eq(sections.id, input.sectionId),
+					eq(sections.schoolId, schoolId),
+					eq(classes.sessionId, input.sessionId)
+				)
+			);
+		if (!section) throw new AuthError('Choose a section from this session.');
+		try {
+			const [student] = await tx
+				.insert(students)
+				.values({
+					schoolId,
+					admissionNo: clean(input.admissionNo),
+					firstName: clean(input.firstName),
+					lastName: clean(input.lastName),
+					currentSectionId: section.id
+				})
+				.returning();
+			await tx.insert(studentEnrollments).values({
+				schoolId,
+				studentId: student.id,
+				sectionId: section.id,
+				sessionId: input.sessionId,
+				status: 'active'
+			});
+			return inviteStudentLogin(tx, schoolId, student.id, email, fullName);
+		} catch (error) {
+			if (error instanceof AuthError) throw error;
+			if (pgCode(error) === '23505') throw new AuthError('This admission number is already used.');
+			if (pgCode(error) === '23514')
+				throw new AuthError('The school has reached its student limit.');
+			throw error;
+		}
+	});
+}
+
+export async function addSessionTimetable(
+	db: AppDb,
+	userId: string,
+	schoolId: string,
+	input: { sessionId: string; fileId: string }
+) {
+	await withSchoolUser(db, userId, schoolId, async (tx) => {
+		await requirePermission(tx, schoolId, [
+			'timetables.manage',
+			'classes.manage',
+			'school.records.manage'
+		]);
+		const [session] = await tx
+			.select({ id: academicSessions.id })
+			.from(academicSessions)
+			.where(
+				and(eq(academicSessions.id, input.sessionId), eq(academicSessions.schoolId, schoolId))
+			);
+		if (!session) throw new AuthError('Choose a session.');
+		await tx.insert(sessionTimetableFiles).values({
+			schoolId,
+			sessionId: session.id,
+			fileId: input.fileId
+		});
+	});
+}
+
+export async function classBoard(db: AppDb, userId: string, schoolId: string) {
+	return withSchoolUser(db, userId, schoolId, async (tx) => {
+		const allowed = await tx.execute(
+			sql`select app.has_any_permission(${schoolId}::uuid, ${'{classes.manage,school.records.manage}'}::text[]) as ok`
+		);
+		if (rowsOf(allowed)[0]?.ok !== true) {
+			return { classes: [], students: [], timetables: [], courses: [], sessions: [] };
+		}
+		const sessionRows = await tx
+			.select({
+				id: academicSessions.id,
+				name: academicSessions.name,
+				status: academicSessions.status
+			})
+			.from(academicSessions)
+			.where(eq(academicSessions.schoolId, schoolId))
+			.orderBy(desc(academicSessions.createdAt));
+		const classRows = await tx
+			.select({
+				id: classes.id,
+				name: classes.name,
+				sessionId: classes.sessionId
+			})
+			.from(classes)
+			.where(eq(classes.schoolId, schoolId))
+			.orderBy(desc(classes.createdAt));
+		const sectionRows = await tx
+			.select({ id: sections.id, classId: sections.classId, name: sections.name })
+			.from(sections)
+			.where(eq(sections.schoolId, schoolId));
+		const feeRows = await tx
+			.select({
+				classId: feeStructures.classId,
+				amountPaise: feeStructures.amountPaise
+			})
+			.from(feeStructures)
+			.where(eq(feeStructures.schoolId, schoolId));
+		const studentRows = await tx
+			.select({
+				classId: sections.classId,
+				admissionNo: students.admissionNo,
+				firstName: students.firstName,
+				lastName: students.lastName
+			})
+			.from(students)
+			.innerJoin(
+				sections,
+				and(eq(sections.id, students.currentSectionId), eq(sections.schoolId, students.schoolId))
+			)
+			.where(and(eq(students.schoolId, schoolId), isNull(students.deletedAt)));
+		const timetableRows = await tx
+			.select({
+				classId: sessionTimetableFiles.classId,
+				fileId: sessionTimetableFiles.fileId
+			})
+			.from(sessionTimetableFiles)
+			.where(eq(sessionTimetableFiles.schoolId, schoolId))
+			.orderBy(desc(sessionTimetableFiles.createdAt));
+		const courseRows = await tx
+			.select({
+				classId: sections.classId,
+				title: courses.title,
+				fileId: courseMaterials.fileId
+			})
+			.from(courses)
+			.innerJoin(
+				sections,
+				and(eq(sections.id, courses.sectionId), eq(sections.schoolId, courses.schoolId))
+			)
+			.leftJoin(
+				courseMaterials,
+				and(
+					eq(courseMaterials.courseId, courses.id),
+					eq(courseMaterials.schoolId, courses.schoolId)
+				)
+			)
+			.where(eq(courses.schoolId, schoolId));
+		return {
+			sessions: sessionRows,
+			classes: classRows.map((item) => {
+				const section = sectionRows.find((row) => row.classId === item.id);
+				const fee = feeRows.find((row) => row.classId === item.id);
+				return {
+					id: item.id,
+					name: item.name,
+					sessionId: item.sessionId,
+					sectionId: section?.id ?? '',
+					sectionName: section?.name ?? '',
+					feeRupees: fee ? Math.round(fee.amountPaise / 100) : null
+				};
+			}),
+			students: studentRows,
+			timetables: timetableRows.filter((row) => row.classId),
+			courses: courseRows
+		};
+	});
+}
+
+async function sessionForClass(tx: TenantTx, schoolId: string, sessionId: string, sessionName: string) {
+	const named = clean(sessionName);
+	if (named) {
+		if (named.length < 2 || named.length > 40) {
+			throw new AuthError('Enter the session, such as 2026-27.');
+		}
+		const [existing] = await tx
+			.select()
+			.from(academicSessions)
+			.where(and(eq(academicSessions.schoolId, schoolId), eq(academicSessions.name, named)));
+		if (existing) return existing;
+		const start = new Date();
+		const end = new Date(start);
+		end.setFullYear(end.getFullYear() + 1);
+		const [active] = await tx
+			.select({ id: academicSessions.id })
+			.from(academicSessions)
+			.where(and(eq(academicSessions.schoolId, schoolId), eq(academicSessions.status, 'active')))
+			.limit(1);
+		const [created] = await tx
+			.insert(academicSessions)
+			.values({
+				schoolId,
+				name: named,
+				startDate: start.toISOString().slice(0, 10),
+				endDate: end.toISOString().slice(0, 10),
+				status: active ? 'planned' : 'active'
+			})
+			.returning();
+		return created;
+	}
+	if (!sessionId) throw new AuthError('Choose a session.');
+	const [chosen] = await tx
+		.select()
+		.from(academicSessions)
+		.where(and(eq(academicSessions.id, sessionId), eq(academicSessions.schoolId, schoolId)));
+	if (!chosen) throw new AuthError('Choose a session.');
+	return chosen;
+}
+
+export async function addSchoolClass(
+	db: AppDb,
+	userId: string,
+	schoolId: string,
+	input: { name: string; feeRupees: string; teacherEmail: string; sessionId: string; sessionName: string }
+) {
+	const name = clean(input.name);
+	if (name.length < 1 || name.length > 80) throw new AuthError('Enter the class name.');
+	const rupees = Number(input.feeRupees);
+	if (!Number.isFinite(rupees) || rupees <= 0 || rupees > 10000000) {
+		throw new AuthError('Enter the class fee in rupees.');
+	}
+	const email = clean(input.teacherEmail).toLowerCase();
+	if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+		throw new AuthError('Enter the teacher email.');
+	}
+	const token = email ? newToken() : '';
+	const createdClass = await withSchoolUser(db, userId, schoolId, async (tx) => {
+		await requirePermission(tx, schoolId, ['classes.manage', 'school.records.manage']);
+		const session = await sessionForClass(tx, schoolId, input.sessionId, input.sessionName);
+		let created;
+		try {
+			[created] = await tx
+				.insert(classes)
+				.values({ schoolId, sessionId: session.id, name, gradeLevel: 0 })
+				.returning();
+		} catch (error) {
+			if (pgCode(error) === '23505') throw new AuthError('This class name is already used in this session.');
+			throw error;
+		}
+		await tx.insert(sections).values({ schoolId, classId: created.id, name });
+		await tx.insert(feeStructures).values({
+			schoolId,
+			sessionId: session.id,
+			classId: created.id,
+			name,
+			amountPaise: Math.round(rupees * 100),
+			category: 'tuition',
+			schedule: 'annual',
+			lateKind: 'none'
+		});
+		if (email) {
+			const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+			await tx.execute(
+				sql`select app.invite_school_member(${schoolId}::uuid, ${email}, ${'Teacher'}, ${'teacher'}, ${hashToken(token)}, ${expires})`
+			);
+		}
+		return { classId: created.id, sessionId: session.id, sessionName: session.name, sectionName: name };
+	});
+	return { ...createdClass, token };
+}
+
+export async function addClassStudent(
+	db: AppDb,
+	userId: string,
+	schoolId: string,
+	input: { classId: string; admissionNo: string; firstName: string; lastName: string; email: string }
+) {
+	const [section] = await withSchoolUser(db, userId, schoolId, (tx) =>
+		tx
+			.select({ id: sections.id, sessionId: classes.sessionId })
+			.from(sections)
+			.innerJoin(
+				classes,
+				and(eq(classes.id, sections.classId), eq(classes.schoolId, sections.schoolId))
+			)
+			.where(and(eq(sections.schoolId, schoolId), eq(sections.classId, input.classId)))
+			.limit(1)
+	);
+	if (!section) throw new AuthError('Choose a class.');
+	const token = await addSessionStudent(db, userId, schoolId, {
+		sessionId: section.sessionId,
+		sectionId: section.id,
+		admissionNo: input.admissionNo,
+		firstName: input.firstName,
+		lastName: input.lastName,
+		email: input.email
+	});
+	return token;
+}
+
+export async function addClassTimetable(
+	db: AppDb,
+	userId: string,
+	schoolId: string,
+	input: { classId: string; fileId: string }
+) {
+	await withSchoolUser(db, userId, schoolId, async (tx) => {
+		await requirePermission(tx, schoolId, [
+			'timetables.manage',
+			'classes.manage',
+			'school.records.manage'
+		]);
+		const [room] = await tx
+			.select({ id: classes.id, sessionId: classes.sessionId })
+			.from(classes)
+			.where(and(eq(classes.id, input.classId), eq(classes.schoolId, schoolId)));
+		if (!room) throw new AuthError('Choose a class.');
+		await tx.insert(sessionTimetableFiles).values({
+			schoolId,
+			sessionId: room.sessionId,
+			classId: room.id,
+			fileId: input.fileId
+		});
+	});
+}
+
+export async function addClassCourse(
+	db: AppDb,
+	userId: string,
+	schoolId: string,
+	input: { classId: string; title: string; fileId: string; kind: 'pdf' | 'note' }
+) {
+	await withSchoolUser(db, userId, schoolId, async (tx) => {
+		await requirePermission(tx, schoolId, [
+			'classes.manage',
+			'school.teaching.write',
+			'school.records.manage'
+		]);
+		const [section] = await tx
+			.select({ id: sections.id })
+			.from(sections)
+			.where(and(eq(sections.schoolId, schoolId), eq(sections.classId, input.classId)))
+			.limit(1);
+		if (!section) throw new AuthError('Choose a class.');
+		let [subject] = await tx
+			.select()
+			.from(subjects)
+			.where(and(eq(subjects.schoolId, schoolId), eq(subjects.code, 'general')))
+			.limit(1);
+		if (!subject) {
+			[subject] = await tx
+				.insert(subjects)
+				.values({ schoolId, name: 'General', code: 'general' })
+				.returning();
+		}
+		const [course] = await tx
+			.insert(courses)
+			.values({
+				schoolId,
+				title: clean(input.title).slice(0, 120) || 'Course',
+				sectionId: section.id,
+				subjectId: subject.id,
+				status: 'published'
+			})
+			.returning();
+		await tx.insert(courseMaterials).values({
+			schoolId,
+			courseId: course.id,
+			title: clean(input.title).slice(0, 120) || 'Course',
+			kind: input.kind,
+			fileId: input.fileId
+		});
 	});
 }
 
@@ -755,8 +1280,10 @@ export async function addStudent(
 	db: AppDb,
 	userId: string,
 	schoolId: string,
-	input: { admissionNo: string; firstName: string; lastName: string }
+	input: { admissionNo: string; firstName: string; lastName: string; email: string }
 ) {
+	const email = studentLoginEmail(input.email);
+	const fullName = `${clean(input.firstName)} ${clean(input.lastName)}`.trim();
 	return withSchoolUser(db, userId, schoolId, async (tx) => {
 		await requirePermission(tx, schoolId, ['school.records.manage', 'users.manage']);
 		try {
@@ -769,8 +1296,11 @@ export async function addStudent(
 					lastName: clean(input.lastName)
 				})
 				.returning();
-			return student;
+			const token = await inviteStudentLogin(tx, schoolId, student.id, email, fullName);
+			return { student, token };
 		} catch (error) {
+			if (error instanceof AuthError) throw error;
+			if (pgCode(error) === '23505') throw new AuthError('This admission number is already used.');
 			if (pgCode(error) === '23514')
 				throw new AuthError('The school has reached its student limit.');
 			throw error;

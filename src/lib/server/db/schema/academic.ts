@@ -12,6 +12,7 @@ import {
 	uuid
 } from 'drizzle-orm/pg-core';
 import { createdAt, deletedAt, primaryId, updatedAt } from './columns';
+import { storedFiles } from './files';
 import { schoolId, users } from './platform';
 
 export const academicSessions = pgTable(
@@ -170,6 +171,38 @@ export const studentEnrollments = pgTable(
 	]
 );
 
+export const sessionTimetableFiles = pgTable(
+	'session_timetable_files',
+	{
+		id: primaryId(),
+		schoolId: schoolId(),
+		sessionId: uuid('session_id').notNull(),
+		classId: uuid('class_id'),
+		fileId: uuid('file_id').notNull(),
+		createdAt: createdAt()
+	},
+	(t) => [
+		unique('session_timetable_files_id_school_uidx').on(t.id, t.schoolId),
+		unique('session_timetable_files_file_uidx').on(t.fileId),
+		index('session_timetable_files_school_idx').on(t.schoolId, t.sessionId),
+		foreignKey({
+			name: 'session_timetable_files_session_fk',
+			columns: [t.sessionId, t.schoolId],
+			foreignColumns: [academicSessions.id, academicSessions.schoolId]
+		}).onDelete('restrict'),
+		foreignKey({
+			name: 'session_timetable_files_class_fk',
+			columns: [t.classId, t.schoolId],
+			foreignColumns: [classes.id, classes.schoolId]
+		}).onDelete('restrict'),
+		foreignKey({
+			name: 'session_timetable_files_file_fk',
+			columns: [t.fileId, t.schoolId],
+			foreignColumns: [storedFiles.id, storedFiles.schoolId]
+		}).onDelete('restrict')
+	]
+);
+
 export const guardianStudents = pgTable(
 	'guardian_students',
 	{
@@ -193,7 +226,7 @@ export const guardianStudents = pgTable(
 		}).onDelete('restrict'),
 		check(
 			'guardian_students_relationship_chk',
-			sql`${t.relationship} in ('mother', 'father', 'guardian', 'other')`
+			sql`${t.relationship} in ('mother', 'father', 'guardian', 'other', 'self')`
 		)
 	]
 );

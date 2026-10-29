@@ -11,12 +11,55 @@
 	const preview = $derived(
 		data.entries.filter((entry) => focused && entry.timetableId === focused.id)
 	);
+	const week = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+	const weekIndex = [1, 2, 3, 4, 5, 6];
+	const periodRows = $derived([...data.periods].sort((left, right) => left.sortOrder - right.sortOrder));
+	const palette = ['bg-blue-100', 'bg-emerald-100', 'bg-amber-100', 'bg-violet-100', 'bg-rose-100', 'bg-cyan-100'];
+	function cell(weekday: number, periodId: string) {
+		return preview.find((entry) => entry.weekday === weekday && entry.periodId === periodId);
+	}
+	function subjectName(subjectId: string) {
+		return data.subjects.find((subject) => subject.id === subjectId)?.name ?? 'Period';
+	}
+	function teacherName(userId: string | null) {
+		return data.people.find((person) => person.id === userId)?.fullName ?? '';
+	}
 </script>
 
-<h1 class="text-2xl font-semibold">Class timetable</h1>
-<p class="mt-1 text-sm text-stone-600">
-	Drafts stay private. Publication checks teacher, room, working-day, and period conflicts.
-</p>
+<p class="text-xs text-slate-400">Dashboard  /  Timetable</p>
+<h1 class="text-2xl font-bold text-slate-900">Timetable</h1>
+<p class="text-sm text-slate-500">Manage class timetable and subject schedules</p>
+<div class="mt-4 overflow-x-auto rounded-2xl bg-white p-3 shadow-sm">
+	<table class="w-full min-w-[760px] border-separate border-spacing-1 text-center text-xs">
+		<thead>
+			<tr>
+				<th class="w-24 text-slate-400">Time</th>
+				{#each week as day (day)}<th class="text-slate-500">{day}</th>{/each}
+			</tr>
+		</thead>
+		<tbody>
+			{#each periodRows as period (period.id)}
+				<tr>
+					<th class="rounded-lg bg-slate-50 px-2 py-3 text-slate-500">{period.name}<br />{period.startTime ?? ''}–{period.endTime ?? ''}</th>
+					{#each weekIndex as weekday (weekday)}
+						{@const entry = cell(weekday, period.id)}
+						<td class="rounded-lg px-1 py-3 {entry ? palette[weekday % palette.length] : 'bg-slate-50 text-slate-300'}">
+							{#if entry}
+								<p class="font-semibold text-slate-800">{subjectName(entry.subjectId)}</p>
+								<p class="text-[10px] text-slate-500">{teacherName(entry.teacherUserId)}</p>
+							{:else}
+								—
+							{/if}
+						</td>
+					{/each}
+				</tr>
+			{:else}
+				<tr><td class="py-8 text-slate-500" colspan="7">Add periods below to build the weekly grid.</td></tr>
+			{/each}
+		</tbody>
+	</table>
+</div>
+<p class="mt-4 text-sm text-slate-500">Drafts stay private until you publish. The forms below save working days, periods, and class slots.</p>
 <Alert message={form?.message} />
 {#if form?.saved}<p role="status" class="mt-3 text-sm text-emerald-800">{form.saved}</p>{/if}
 

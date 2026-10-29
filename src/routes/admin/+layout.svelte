@@ -5,9 +5,6 @@
 	let { data, children }: LayoutProps = $props();
 	const links = [
 		{ href: '/admin', label: 'Home' },
-		{ href: '/admin/schools', label: 'Schools' },
-		{ href: '/admin/audit', label: 'Audit' },
-		{ href: '/admin/settings', label: 'Operations' },
 		{ href: '/account', label: 'Profile' }
 	];
 </script>
