@@ -46,6 +46,18 @@ export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
 
 const SCHOOL_ROLES = ['school_admin', 'manager_admin', 'teacher', 'parent'] as const;
 
+const MANAGER_HOME_PERMISSIONS = [
+	'classes.manage',
+	'timetables.manage',
+	'exams.manage',
+	'users.manage',
+	'fees.configure',
+	'complaints.resolve',
+	'documents.approve',
+	'reports.export',
+	'school.settings.manage'
+] as const;
+
 function clean(value: unknown) {
 	return String(value ?? '').trim();
 }
@@ -633,6 +645,22 @@ export async function inviteStaff(
 		await tx.execute(
 			sql`select app.invite_school_member(${schoolId}::uuid, ${email}, ${input.fullName.trim()}, ${input.roleKey}, ${hashToken(token)}, ${expires})`
 		);
+		if (input.roleKey === 'manager_admin') {
+			const keys = `{${MANAGER_HOME_PERMISSIONS.join(',')}}`;
+			await tx.execute(sql`
+				insert into membership_permissions (membership_id, permission_key)
+				select m.id, key
+				from school_memberships m
+				join users u on u.id = m.user_id
+				join roles r on r.id = m.role_id
+				cross join unnest(${keys}::text[]) as key
+				where m.school_id = ${schoolId}::uuid
+					and lower(u.email) = ${email}
+					and r.key = 'manager_admin'
+					and m.deleted_at is null
+				on conflict do nothing
+			`);
+		}
 		await writeAudit(tx, {
 			schoolId,
 			actorUserId: userId,

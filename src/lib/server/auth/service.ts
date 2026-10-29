@@ -63,6 +63,7 @@ export async function login(db: AppDb, email: string, password: string): Promise
 	const row = rowsOf(result)[0] as LoginRow | undefined;
 	if (!row?.password_hash) {
 		await verifyAgainstDummy(password);
+		if (row && !row.email_verified_at) return { status: 'unverified' };
 		return { status: 'invalid' };
 	}
 	const matches = await verifyPassword(password, row.password_hash);

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import Alert from '#lib/components/Alert.svelte';
+	import GridIcon from '#lib/components/GridIcon.svelte';
 	import type { PageProps } from './$types';
 
 	let { data, form }: PageProps = $props();
@@ -18,15 +19,7 @@
 				<span
 					class="grid h-12 w-12 place-items-center rounded-full border border-emerald-200 text-emerald-700"
 				>
-					<svg
-						viewBox="0 0 24 24"
-						class="h-6 w-6"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="1.7"
-					>
-						<circle cx="12" cy="12" r="7" />
-					</svg>
+					<GridIcon label={item.label} href={item.href} />
 				</span>
 				{item.label}
 			</a>

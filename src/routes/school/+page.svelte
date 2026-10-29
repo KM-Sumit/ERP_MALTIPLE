@@ -1,35 +1,32 @@
 <script lang="ts">
-	import { resolve } from '$app/paths';
 	import QuickGrid from '#lib/components/QuickGrid.svelte';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
+
+	function pick(hrefs: string[]) {
+		return hrefs.flatMap((href) => data.links.filter((link) => link.href === href));
+	}
+
 	const academic = $derived(
-		data.links.filter((link) =>
-			[
-				'/school/academic',
-				'/school/timetable',
-				'/school/exams',
-				'/school/courses',
-				'/school/people',
-				'/school/staff'
-			].includes(link.href)
-		)
+		pick([
+			'/school/academic',
+			'/school/timetable',
+			'/school/exams',
+			'/school/courses',
+			'/school/staff',
+			'/school/people'
+		])
 	);
 	const services = $derived(
-		data.links.filter((link) =>
-			[
-				'/school/fees',
-				'/school/complaints',
-				'/school/documents',
-				'/school/notices',
-				'/school/reports',
-				'/school/audit',
-				'/school/profile',
-				'/school/policies',
-				'/school/setup'
-			].includes(link.href)
-		)
+		pick([
+			'/school/profile',
+			'/school/notices',
+			'/school/fees',
+			'/school/complaints',
+			'/school/documents',
+			'/school/reports'
+		])
 	);
 </script>
 
@@ -38,14 +35,6 @@
 		<p class="text-center text-sm font-semibold tracking-wide text-slate-800 uppercase">
 			{data.school.name}
 		</p>
-	{/if}
-	{#if data.onboarding && !data.onboarding.completedAt}
-		<a
-			class="rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-950"
-			href={resolve('/school/setup')}
-		>
-			Setup is still on {data.onboarding.step}. Tap to continue.
-		</a>
 	{/if}
 	<QuickGrid title="Academic" items={academic} />
 	<QuickGrid title="Services" items={services} />
