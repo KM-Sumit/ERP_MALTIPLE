@@ -18,7 +18,7 @@ if (password.includes('$erpapppw$')) {
 
 const sql = postgres(ownerUrl, {
 	max: 1,
-	ssl: ownerUrl.includes('sslmode=require') ? 'require' : undefined
+	ssl: ownerUrl.includes('sslmode=require') || ownerUrl.includes('.supabase.') ? 'require' : undefined
 });
 
 const existing = await sql`select 1 from pg_roles where rolname = 'erp_app'`;

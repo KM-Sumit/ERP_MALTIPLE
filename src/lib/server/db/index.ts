@@ -6,6 +6,10 @@ import type { AppDb } from './tenant';
 
 let database: AppDb | undefined;
 
+function needsSsl(connection: string) {
+	return connection.includes('sslmode=require') || connection.includes('.supabase.');
+}
+
 /**
  * On Render, DATABASE_URL is the database owner used only for migrations.
  * ERP_APP_PASSWORD switches the running app to the erp_app login so row-level
@@ -16,7 +20,9 @@ export function runtimeDatabaseUrl(ownerUrl: string | undefined) {
 	const password = process.env.ERP_APP_PASSWORD;
 	if (!password) return ownerUrl;
 	const url = new URL(ownerUrl);
-	url.username = 'erp_app';
+	// Supabase's pooler routes by `role.projectref`. Keep that suffix.
+	const tenant = url.username.includes('.') ? url.username.slice(url.username.indexOf('.')) : '';
+	url.username = `erp_app${tenant}`;
 	url.password = password;
 	return url.toString();
 }
@@ -33,7 +39,7 @@ export function getDb(): AppDb {
 		database = drizzle(
 			postgres(connection, {
 				max: 10,
-				ssl: connection.includes('sslmode=require') ? 'require' : undefined
+				ssl: needsSsl(connection) ? 'require' : undefined
 			}),
 			{ schema }
 		);
