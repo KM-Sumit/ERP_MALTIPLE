@@ -9,7 +9,8 @@
 	let { data, form }: PageProps = $props();
 	const query = $derived(page.url.searchParams.get('q')?.trim().toLowerCase() ?? '');
 	const adding = $derived(page.url.searchParams.get('add') === '1');
-	const selectedSessionId = $derived(form?.sessionId ?? page.url.searchParams.get('session') ?? data.sessions[0]?.id ?? '');
+	const selectedSessionId = $derived(form?.sessionId ?? page.url.searchParams.get('session') ?? '');
+	const showSessions = $derived(page.url.searchParams.get('list') === 'sessions');
 	const selectedSession = $derived(data.sessions.find((session) => session.id === selectedSessionId) ?? null);
 	const sessionClasses = $derived(
 		data.classes.filter((room) => room.sessionId === selectedSession?.id && (!query || `${room.name} ${room.sectionName}`.toLowerCase().includes(query)))
@@ -52,13 +53,35 @@
 	{#snippet actions()}
 		<a class="rounded-lg bg-[#2f6bff] px-3 py-2 text-sm font-semibold text-white" href={href({ add: '1', class: '' })}>+ Add Class</a>
 	{/snippet}
-	<div class="flex flex-wrap gap-2 border-b border-slate-100 p-3">
-		{#each data.sessions as session (session.id)}
-			<a class="rounded-full px-3 py-1 text-sm {session.id === selectedSessionId ? 'bg-[#2f6bff] text-white' : 'bg-slate-100'}" href={`${resolve('/school/classes')}?session=${session.id}`}>{session.name}</a>
-		{/each}
+	<div class="flex flex-wrap items-center gap-2 border-b border-slate-100 p-3">
+		{#if !selectedSessionId && !showSessions}
+			<a class="rounded-lg bg-[#2f6bff] px-4 py-2 text-sm font-semibold text-white" href={`${resolve('/school/classes')}?list=sessions`}>Sessions</a>
+			<p class="text-sm text-slate-500">Open Sessions, then choose one to add its classes.</p>
+		{:else if !selectedSessionId}
+			{#each data.sessions as session (session.id)}
+				<a class="rounded-full bg-slate-100 px-3 py-1 text-sm" href={`${resolve('/school/classes')}?session=${session.id}`}>{session.name}</a>
+			{:else}
+				<p class="text-sm text-slate-500">No session yet. Create one in Academics.</p>
+			{/each}
+		{:else}
+			<a class="rounded-full bg-slate-100 px-3 py-1 text-sm" href={`${resolve('/school/classes')}?list=sessions`}>All sessions</a>
+			<span class="rounded-full bg-[#2f6bff] px-3 py-1 text-sm text-white">{selectedSession?.name}</span>
+		{/if}
 	</div>
+	{#if selectedSession}
+		<form class="grid gap-2 border-b border-slate-100 p-3 sm:grid-cols-2" method="post" action="?/class">
+			<h2 class="sm:col-span-2 font-semibold">Add class in {selectedSession.name}</h2>
+			<input type="hidden" name="sessionId" value={selectedSession.id} />
+			<Field label="Class name" name="name" required maxlength={80} />
+			<label class="grid gap-1 text-sm">Fees in rupees
+				<input class="rounded-lg border px-2 py-2" name="feeRupees" type="number" min="1" step="1" required />
+			</label>
+			<button class="rounded-lg bg-[#2f6bff] px-3 py-2 text-sm font-semibold text-white sm:col-span-2" type="submit">Add class</button>
+		</form>
+	{/if}
 	<Alert message={form?.message} />
 	{#if form?.saved}<p class="px-3 text-sm text-emerald-700" role="status">{form.saved}</p>{/if}
+	{#if selectedSession}
 	<div class="overflow-x-auto">
 		<table class="w-full min-w-[640px] text-left text-sm">
 			<thead class="text-xs text-slate-400">
@@ -81,6 +104,7 @@
 			</tbody>
 		</table>
 	</div>
+	{/if}
 	{#snippet side()}
 		{#if adding || !selected}
 			<h2 class="font-bold">Add Class</h2>

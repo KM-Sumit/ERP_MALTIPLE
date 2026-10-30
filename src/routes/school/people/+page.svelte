@@ -10,6 +10,11 @@
 	const query = $derived(page.url.searchParams.get('q')?.trim().toLowerCase() ?? '');
 	const tab = $derived(page.url.searchParams.get('tab') ?? 'all');
 	const classFilter = $derived(page.url.searchParams.get('class') ?? '');
+	const sessionId = $derived(page.url.searchParams.get('session') ?? '');
+	const roomId = $derived(page.url.searchParams.get('room') ?? '');
+	const showSessions = $derived(page.url.searchParams.get('list') === 'sessions');
+	const sessionRooms = $derived(data.classes.filter((room) => room.sessionId === sessionId));
+	const chosenRoom = $derived(sessionRooms.find((room) => room.id === roomId) ?? null);
 	const pageNo = $derived(Math.max(1, Number(page.url.searchParams.get('page') ?? '1') || 1));
 	const adding = $derived(page.url.searchParams.get('add') === '1');
 	const monthStart = Date.now() - 31 * 24 * 60 * 60 * 1000;
@@ -21,6 +26,8 @@
 			if (tab === 'alumni' && student.status !== 'alumni') return false;
 			if (tab === 'withdrawn' && student.status !== 'withdrawn') return false;
 			if (classFilter && student.className !== classFilter) return false;
+			if (sessionId && student.sessionId !== sessionId) return false;
+			if (roomId && student.classId !== roomId) return false;
 			const haystack = `${student.firstName} ${student.lastName} ${student.admissionNo} ${student.className} ${student.sectionName} ${student.email}`.toLowerCase();
 			return !query || haystack.includes(query);
 		})
@@ -71,7 +78,41 @@
 		<a class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold" href={resolve('/school/reports/export')}>Export</a>
 		<a class="rounded-lg bg-[#2f6bff] px-3 py-2 text-sm font-semibold text-white" href={href({ add: '1', id: '' })}>+ Add Student</a>
 	{/snippet}
-	<div class="flex flex-wrap gap-2 border-b border-slate-100 p-3">
+	<div class="grid gap-3 border-b border-slate-100 p-3">
+		<div class="flex flex-wrap items-center gap-2">
+			{#if !sessionId && !showSessions}
+				<a class="rounded-lg bg-[#2f6bff] px-4 py-2 text-sm font-semibold text-white" href={href({ list: 'sessions', session: '', room: '' })}>Sessions</a>
+			{:else if !sessionId}
+				{#each data.sessions as session (session.id)}
+					<a class="rounded-full bg-slate-100 px-3 py-1 text-sm" href={href({ session: session.id, list: '', room: '', page: '' })}>{session.name}</a>
+				{:else}
+					<p class="text-sm text-slate-500">No session yet. Create one in Academics.</p>
+				{/each}
+			{:else}
+				<a class="rounded-full bg-slate-100 px-3 py-1 text-sm" href={href({ list: 'sessions', session: '', room: '' })}>All sessions</a>
+				<span class="rounded-full bg-[#2f6bff] px-3 py-1 text-sm text-white">{data.sessions.find((session) => session.id === sessionId)?.name}</span>
+			{/if}
+		</div>
+		{#if sessionId && !chosenRoom}
+			<div class="flex flex-wrap gap-2">
+				{#each sessionRooms as room (room.id)}
+					<a class="rounded-full bg-slate-100 px-3 py-1 text-sm" href={href({ room: room.id, page: '' })}>{room.name}</a>
+				{:else}
+					<p class="text-sm text-slate-500">No class in this session yet. Add one in Classes & Sections.</p>
+				{/each}
+			</div>
+		{/if}
+		{#if chosenRoom}
+			<form class="grid gap-2 sm:grid-cols-2" method="post" action="?/enroll">
+				<h2 class="sm:col-span-2 font-semibold">Add student in class {chosenRoom.name}</h2>
+				<input type="hidden" name="classId" value={chosenRoom.id} />
+				<Field label="Admission number" name="admissionNo" required />
+				<Field label="First name" name="firstName" required />
+				<Field label="Last name" name="lastName" required />
+				<Field label="Student email" name="email" type="email" required />
+				<button class="rounded-lg bg-[#2f6bff] px-3 py-2 text-sm font-semibold text-white sm:col-span-2" type="submit">Add student</button>
+			</form>
+		{/if}
 		<select class="rounded-lg border border-slate-200 px-2 py-1.5 text-sm" onchange={(event) => { location.href = href({ class: event.currentTarget.value, page: '' }); }}>
 			<option value="">Select Class</option>
 			{#each classes as name (name)}

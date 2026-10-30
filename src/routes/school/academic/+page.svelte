@@ -29,6 +29,17 @@
 <Alert message={form?.message} />
 {#if form?.saved}<p role="status" class="mt-2 text-sm text-emerald-800">{form.saved}</p>{/if}
 
+<section class="mt-4 rounded-2xl bg-white p-4 shadow-sm">
+	<h2 class="font-semibold text-slate-900">New session</h2>
+	<form class="mt-3 grid gap-3" method="post" action="?/structure">
+		<Field label="Session name" name="sessionName" required maxlength={40} placeholder="2026-27" />
+		<Field label="Start" name="startDate" type="date" />
+		<Field label="End" name="endDate" type="date" />
+		<p class="text-xs text-slate-500">Leave the dates empty to use this school year, from 1 April to 31 March.</p>
+		<button class="rounded-2xl bg-emerald-700 px-4 py-3 font-semibold text-white" type="submit">Create session</button>
+	</form>
+</section>
+
 {#if data.sessions.length === 0}
 	<p class="mt-4 text-sm text-slate-600">No sessions yet. Create one below.</p>
 {:else}
@@ -43,7 +54,8 @@
 			>
 				<span class="block font-semibold">{session.name}</span>
 				<span class="text-xs {selected?.id === session.id ? 'text-emerald-100' : 'text-slate-500'}"
-					>{count} {count === 1 ? 'student' : 'students'}</span
+					>{session.startDate} – {session.endDate} · {session.status} · {count}
+					{count === 1 ? 'student' : 'students'}</span
 				>
 			</a>
 		{/each}
@@ -53,7 +65,24 @@
 {#if selected}
 	<section class="mt-4 rounded-2xl bg-white p-4 shadow-sm">
 		<h2 class="text-lg font-semibold text-slate-900">{selected.name}</h2>
-		<p class="text-sm text-slate-600">
+		<form class="mt-4 grid gap-3" method="post" action="?session={selected.id}&/session">
+			<h3 class="font-medium text-slate-900">Edit session</h3>
+			<input type="hidden" name="sessionId" value={selected.id} />
+			<Field label="Session name" name="sessionName" value={selected.name} maxlength={40} required />
+			<Field label="Start" name="startDate" type="date" value={String(selected.startDate).slice(0, 10)} required />
+			<Field label="End" name="endDate" type="date" value={String(selected.endDate).slice(0, 10)} required />
+			<label class="grid gap-1 text-sm">
+				<span class="font-medium text-slate-700">Status</span>
+				<select class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" name="status">
+					<option value="planned" selected={selected.status === 'planned'}>Planned</option>
+					<option value="active" selected={selected.status === 'active'}>Active</option>
+					<option value="closed" selected={selected.status === 'closed'}>Closed</option>
+				</select>
+			</label>
+			<p class="text-xs text-slate-500">Only one session can be active. Saving this one as active moves the previous active session to planned.</p>
+			<button class="rounded-2xl bg-emerald-700 px-4 py-3 font-semibold text-white" type="submit">Save session</button>
+		</form>
+		<p class="mt-4 text-sm text-slate-600">
 			{sessionStudents.length}
 			{sessionStudents.length === 1 ? 'student' : 'students'} in this session
 		</p>
@@ -159,6 +188,7 @@
 		<Field label="New session name" name="sessionName" />
 		<Field label="Start" name="startDate" type="date" />
 		<Field label="End" name="endDate" type="date" />
+		<p class="text-xs text-slate-500">Leave the dates empty to use this school year, from 1 April to 31 March. The end date must be on or after the start date.</p>
 		<Field label="Class name" name="className" />
 		<Field label="Section" name="sectionName" />
 		<Field label="Subject" name="subjectName" />

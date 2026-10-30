@@ -3,6 +3,7 @@ import { AuthError } from '../auth/service';
 import {
 	academicSessions,
 	attendanceRecords,
+	classTeachers,
 	classes,
 	complaints,
 	courseMaterials,
@@ -21,7 +22,8 @@ import {
 	subjects,
 	timetableEntries,
 	timetablePeriods,
-	timetables
+	timetables,
+	users
 } from '../db/schema';
 import { withSchoolUser, type AppDb, type TenantTx } from '../db/tenant';
 import { linkedStudent } from './access';
@@ -384,5 +386,34 @@ export async function studentNotices(
 			.orderBy(desc(schoolNotices.createdAt))
 			.limit(30);
 		return { ...base, notices };
+	});
+}
+
+export async function studentTeachers(
+	db: AppDb,
+	userId: string,
+	schoolId: string,
+	studentId: string | null
+) {
+	return withSchoolUser(db, userId, schoolId, async (tx) => {
+		const base = await desk(tx, schoolId, userId, studentId);
+		if (!base.placement) return { ...base, teachers: [] };
+		const teachers = await tx
+			.select({
+				id: classTeachers.id,
+				name: users.fullName,
+				email: users.email,
+				attendanceTime: classTeachers.attendanceTime
+			})
+			.from(classTeachers)
+			.innerJoin(users, eq(users.id, classTeachers.teacherUserId))
+			.where(
+				and(
+					eq(classTeachers.schoolId, schoolId),
+					eq(classTeachers.sectionId, base.placement.sectionId),
+					eq(classTeachers.sessionId, base.placement.sessionId)
+				)
+			);
+		return { ...base, teachers };
 	});
 }

@@ -138,6 +138,7 @@ export const classTeachers = pgTable(
 		teacherUserId: uuid('teacher_user_id')
 			.notNull()
 			.references(() => users.id, { onDelete: 'restrict' }),
+		attendanceTime: time('attendance_time'),
 		createdAt: createdAt()
 	},
 	(t) => [

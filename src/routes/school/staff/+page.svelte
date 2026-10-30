@@ -10,6 +10,11 @@
 	const query = $derived(page.url.searchParams.get('q')?.trim().toLowerCase() ?? '');
 	const tab = $derived(page.url.searchParams.get('tab') ?? 'all');
 	const adding = $derived(page.url.searchParams.get('add') === '1');
+	const sessionId = $derived(page.url.searchParams.get('session') ?? '');
+	const roomId = $derived(page.url.searchParams.get('room') ?? '');
+	const showSessions = $derived(page.url.searchParams.get('list') === 'sessions');
+	const sessionRooms = $derived(data.classes.filter((room) => room.sessionId === sessionId));
+	const chosenRoom = $derived(sessionRooms.find((room) => room.id === roomId) ?? null);
 	const monthStart = Date.now() - 31 * 24 * 60 * 60 * 1000;
 	const filtered = $derived(
 		data.teachers.filter((teacher) => {
@@ -60,6 +65,51 @@
 	{#snippet actions()}
 		<a class="rounded-lg bg-[#2f6bff] px-3 py-2 text-sm font-semibold text-white" href={href({ add: '1', id: '' })}>+ Add Teacher</a>
 	{/snippet}
+	<div class="grid gap-3 border-b border-slate-100 p-3">
+		<div class="flex flex-wrap items-center gap-2">
+			{#if !sessionId && !showSessions}
+				<a class="rounded-lg bg-[#2f6bff] px-4 py-2 text-sm font-semibold text-white" href={href({ list: 'sessions', session: '', room: '' })}>Sessions</a>
+			{:else if !sessionId}
+				{#each data.sessions as session (session.id)}
+					<a class="rounded-full bg-slate-100 px-3 py-1 text-sm" href={href({ session: session.id, list: '', room: '' })}>{session.name}</a>
+				{:else}
+					<p class="text-sm text-slate-500">No session yet. Create one in Academics.</p>
+				{/each}
+			{:else}
+				<a class="rounded-full bg-slate-100 px-3 py-1 text-sm" href={href({ list: 'sessions', session: '', room: '' })}>All sessions</a>
+				<span class="rounded-full bg-[#2f6bff] px-3 py-1 text-sm text-white">{data.sessions.find((session) => session.id === sessionId)?.name}</span>
+			{/if}
+		</div>
+		{#if sessionId && !chosenRoom}
+			<div class="flex flex-wrap gap-2">
+				{#each sessionRooms as room (room.id)}
+					<a class="rounded-full bg-slate-100 px-3 py-1 text-sm" href={href({ room: room.id })}>{room.name}</a>
+				{:else}
+					<p class="text-sm text-slate-500">No class in this session yet.</p>
+				{/each}
+			</div>
+		{/if}
+		{#if chosenRoom}
+			<form class="grid gap-2 sm:grid-cols-2" method="post" action="?/assign">
+				<h2 class="sm:col-span-2 font-semibold">Assign teacher for class {chosenRoom.name}</h2>
+				<input type="hidden" name="classId" value={chosenRoom.id} />
+				<label class="grid gap-1 text-sm">Teacher
+					<select class="rounded-lg border px-2 py-2" name="teacherUserId" required>
+						{#each data.teachers as teacher (teacher.id)}
+							<option value={teacher.userId}>{teacher.name}</option>
+						{/each}
+					</select>
+				</label>
+				<label class="grid gap-1 text-sm">Attendance time
+					<input class="rounded-lg border px-2 py-2" name="attendanceTime" type="time" required />
+				</label>
+				{#if data.teachers.length === 0}
+					<p class="text-sm text-slate-500 sm:col-span-2">Add a teacher first, then assign that teacher to this class.</p>
+				{/if}
+				<button class="rounded-lg bg-[#2f6bff] px-3 py-2 text-sm font-semibold text-white sm:col-span-2" type="submit" disabled={data.teachers.length === 0}>Save class teacher</button>
+			</form>
+		{/if}
+	</div>
 	<Alert message={form?.message} />
 	{#if form?.saved}<p class="px-3 text-sm text-emerald-700" role="status">{form.saved}</p>{/if}
 	{#if form?.invitePath}

@@ -7,7 +7,7 @@ import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, cookies }) => {
 	if (!locals.userId) redirect(303, '/login');
-	if (locals.isPlatformAdmin) redirect(303, '/admin');
+	if (locals.roleKey === 'school_admin' || locals.roleKey === 'manager_admin') redirect(303, '/school');
 	const token = cookies.get(SESSION_COOKIE);
 	if (!token) redirect(303, '/login');
 	const schools = await accountSchools(getDb(), token);

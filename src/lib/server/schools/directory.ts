@@ -13,7 +13,7 @@ export async function studentRoster(db: AppDb, userId: string, schoolId: string)
 			await tx.execute(sql`
 				select s.id, s.admission_no, s.first_name, s.last_name, s.status,
 					s.date_of_birth::text as date_of_birth, s.created_at,
-					c.name as class_name, sec.name as section_name, en.roll_number,
+					c.id as class_id, c.session_id, c.name as class_name, sec.name as section_name, en.roll_number,
 					self_user.email as email,
 					parent.full_name as guardian_name, parent.email as guardian_email
 				from students s
@@ -44,6 +44,8 @@ export async function studentRoster(db: AppDb, userId: string, schoolId: string)
 			status: String(row.status),
 			dateOfBirth: row.date_of_birth ? String(row.date_of_birth) : '',
 			createdAt: String(row.created_at),
+			classId: row.class_id ? String(row.class_id) : '',
+			sessionId: row.session_id ? String(row.session_id) : '',
 			className: row.class_name ? String(row.class_name) : '',
 			sectionName: row.section_name ? String(row.section_name) : '',
 			rollNumber: row.roll_number ? String(row.roll_number) : '',
@@ -58,7 +60,7 @@ export async function teacherRoster(db: AppDb, userId: string, schoolId: string)
 	return withSchoolUser(db, userId, schoolId, async (tx) => {
 		const rows = rowsOf(
 			await tx.execute(sql`
-				select m.id, u.full_name, u.email, u.phone, m.status, m.created_at,
+				select m.id, u.id as user_id, u.full_name, u.email, u.phone, m.status, m.created_at,
 					coalesce(string_agg(distinct sub.name, ', '), '') as subjects,
 					coalesce(string_agg(distinct c.name, ', '), '') as classes
 				from school_memberships m
@@ -69,12 +71,13 @@ export async function teacherRoster(db: AppDb, userId: string, schoolId: string)
 				left join sections sec on sec.id = ta.section_id and sec.school_id = m.school_id
 				left join classes c on c.id = sec.class_id and c.school_id = m.school_id
 				where m.school_id = ${schoolId}::uuid and m.deleted_at is null and r.key = 'teacher'
-				group by m.id, u.full_name, u.email, u.phone, m.status, m.created_at
+				group by m.id, u.id, u.full_name, u.email, u.phone, m.status, m.created_at
 				order by u.full_name
 			`)
 		);
 		return rows.map((row) => ({
 			id: String(row.id),
+			userId: String(row.user_id),
 			name: String(row.full_name),
 			email: row.email ? String(row.email) : '',
 			phone: row.phone ? String(row.phone) : '',

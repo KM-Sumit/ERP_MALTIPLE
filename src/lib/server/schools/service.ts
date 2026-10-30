@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, ilike, isNull, ne, or, sql } from 'drizzle-orm';
 import { isAssignablePermission } from '../../permissions';
 import { AuthError } from '../auth/service';
 import { hashToken, newToken } from '../auth/password';
@@ -10,6 +10,7 @@ import {
 	academicSessions,
 	attendanceRecords,
 	auditEvents,
+	classTeachers,
 	classes,
 	complaintAttachments,
 	complaints,
@@ -656,6 +657,32 @@ export async function academicCatalog(db: AppDb, userId: string, schoolId: strin
 	});
 }
 
+function sessionDates(startDate: string, endDate: string) {
+	const start = clean(startDate);
+	const end = clean(endDate);
+	const iso = /^\d{4}-\d{2}-\d{2}$/;
+	if (!start && !end) {
+		const parts = new Intl.DateTimeFormat('en-CA', {
+			timeZone: 'Asia/Kolkata',
+			year: 'numeric',
+			month: '2-digit'
+		}).format(new Date());
+		const [yearText, monthText] = parts.split('-');
+		const year = Number(yearText);
+		const beginYear = Number(monthText) >= 4 ? year : year - 1;
+		return { startDate: `${beginYear}-04-01`, endDate: `${beginYear + 1}-03-31` };
+	}
+	if (!iso.test(start) || !iso.test(end)) throw new AuthError('Enter both the start and end date.');
+	if (end < start) throw new AuthError('The end date must be on or after the start date.');
+	return { startDate: start, endDate: end };
+}
+
+function subjectCode(name: string, code: string) {
+	const slug = (clean(code) || clean(name)).toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 20);
+	if (!slug) throw new AuthError('Enter the subject name.');
+	return slug;
+}
+
 export async function addAcademicStructure(
 	db: AppDb,
 	userId: string,
@@ -673,46 +700,125 @@ export async function addAcademicStructure(
 ) {
 	await withSchoolUser(db, userId, schoolId, async (tx) => {
 		await requirePermission(tx, schoolId, ['classes.manage', 'school.records.manage']);
-		if (input.sessionName) {
-			await tx.insert(academicSessions).values({
-				schoolId,
-				name: clean(input.sessionName),
-				startDate: clean(input.startDate),
-				endDate: clean(input.endDate),
-				status: 'planned'
-			});
+		let session: { id: string } | undefined;
+		const sessionName = clean(input.sessionName);
+		if (sessionName) {
+			const dates = sessionDates(input.startDate ?? '', input.endDate ?? '');
+			try {
+				const [created] = await tx
+					.insert(academicSessions)
+					.values({
+						schoolId,
+						name: sessionName,
+						startDate: dates.startDate,
+						endDate: dates.endDate,
+						status: 'planned'
+					})
+					.returning({ id: academicSessions.id });
+				session = created;
+			} catch (error) {
+				if (pgCode(error) === '23505') throw new AuthError('This session name is already used.');
+				throw error;
+			}
 		}
-		const [session] = await tx
-			.select()
-			.from(academicSessions)
-			.where(eq(academicSessions.schoolId, schoolId))
-			.limit(1);
-		if (input.className) {
+		if (!session) {
+			const [latest] = await tx
+				.select({ id: academicSessions.id })
+				.from(academicSessions)
+				.where(eq(academicSessions.schoolId, schoolId))
+				.orderBy(desc(academicSessions.createdAt))
+				.limit(1);
+			session = latest;
+		}
+		const className = clean(input.className);
+		if (className) {
 			if (!session) throw new AuthError('Create an academic session first.');
-			const grade = 0;
-			const [created] = await tx
-				.insert(classes)
-				.values({
-					schoolId,
-					sessionId: session.id,
-					name: clean(input.className),
-					gradeLevel: grade
-				})
-				.returning();
-			if (input.sectionName) {
+			try {
+				const [created] = await tx
+					.insert(classes)
+					.values({
+						schoolId,
+						sessionId: session.id,
+						name: className,
+						gradeLevel: 0
+					})
+					.returning();
 				await tx.insert(sections).values({
 					schoolId,
 					classId: created.id,
-					name: clean(input.sectionName)
+					name: clean(input.sectionName) || className
 				});
+			} catch (error) {
+				if (pgCode(error) === '23505') {
+					throw new AuthError('This class name is already used in this session.');
+				}
+				throw error;
 			}
 		}
-		if (input.subjectName) {
-			await tx.insert(subjects).values({
-				schoolId,
-				name: clean(input.subjectName),
-				code: clean(input.subjectCode).toLowerCase()
-			});
+		const subjectName = clean(input.subjectName);
+		if (subjectName || clean(input.subjectCode)) {
+			try {
+				await tx.insert(subjects).values({
+					schoolId,
+					name: subjectName || subjectCode('', input.subjectCode ?? ''),
+					code: subjectCode(subjectName, input.subjectCode ?? '')
+				});
+			} catch (error) {
+				if (pgCode(error) === '23505') throw new AuthError('This subject code is already used.');
+				throw error;
+			}
+		}
+	});
+}
+
+export async function updateAcademicSession(
+	db: AppDb,
+	userId: string,
+	schoolId: string,
+	input: { sessionId: string; name: string; startDate: string; endDate: string; status: string }
+) {
+	const name = clean(input.name);
+	if (name.length < 2 || name.length > 40) throw new AuthError('Enter the session, such as 2026-27.');
+	const status = clean(input.status);
+	if (status !== 'planned' && status !== 'active' && status !== 'closed') {
+		throw new AuthError('Choose planned, active, or closed.');
+	}
+	if (!clean(input.startDate) || !clean(input.endDate)) {
+		throw new AuthError('Enter both the start and end date.');
+	}
+	const dates = sessionDates(input.startDate, input.endDate);
+	await withSchoolUser(db, userId, schoolId, async (tx) => {
+		await requirePermission(tx, schoolId, ['classes.manage', 'school.records.manage']);
+		const [existing] = await tx
+			.select({ id: academicSessions.id })
+			.from(academicSessions)
+			.where(and(eq(academicSessions.id, input.sessionId), eq(academicSessions.schoolId, schoolId)));
+		if (!existing) throw new AuthError('Choose a session.');
+		if (status === 'active') {
+			await tx
+				.update(academicSessions)
+				.set({ status: 'planned' })
+				.where(
+					and(
+						eq(academicSessions.schoolId, schoolId),
+						eq(academicSessions.status, 'active'),
+						ne(academicSessions.id, existing.id)
+					)
+				);
+		}
+		try {
+			await tx
+				.update(academicSessions)
+				.set({
+					name,
+					startDate: dates.startDate,
+					endDate: dates.endDate,
+					status
+				})
+				.where(eq(academicSessions.id, existing.id));
+		} catch (error) {
+			if (pgCode(error) === '23505') throw new AuthError('This session name is already used.');
+			throw error;
 		}
 	});
 }
@@ -1028,6 +1134,80 @@ export async function addSchoolClass(
 		return { classId: created.id, sessionId: session.id, sessionName: session.name, sectionName: name };
 	});
 	return { ...createdClass, token };
+}
+
+export async function assignClassTeacher(
+	db: AppDb,
+	userId: string,
+	schoolId: string,
+	input: { classId: string; teacherUserId: string; attendanceTime: string }
+) {
+	const attendanceTime = clean(input.attendanceTime).slice(0, 5);
+	if (!/^\d{2}:\d{2}$/.test(attendanceTime)) throw new AuthError('Enter the attendance time.');
+	await withSchoolUser(db, userId, schoolId, async (tx) => {
+		await requirePermission(tx, schoolId, ['classes.manage', 'users.manage', 'school.members.manage']);
+		const [section] = await tx
+			.select({ id: sections.id, sessionId: classes.sessionId })
+			.from(sections)
+			.innerJoin(classes, and(eq(classes.id, sections.classId), eq(classes.schoolId, sections.schoolId)))
+			.where(and(eq(sections.schoolId, schoolId), eq(sections.classId, input.classId)))
+			.limit(1);
+		if (!section) throw new AuthError('Choose a class.');
+		const teacher = rowsOf(
+			await tx.execute(sql`
+				select u.id from users u
+				join school_memberships m on m.user_id = u.id and m.school_id = ${schoolId}::uuid
+				join roles r on r.id = m.role_id
+				where u.id = ${input.teacherUserId}::uuid and m.deleted_at is null and r.key = 'teacher'
+				limit 1
+			`)
+		)[0];
+		if (!teacher) throw new AuthError('Choose a teacher.');
+		const teacherUserId = String(teacher.id);
+		const [current] = await tx
+			.select({ id: classTeachers.id })
+			.from(classTeachers)
+			.where(and(eq(classTeachers.schoolId, schoolId), eq(classTeachers.sectionId, section.id), eq(classTeachers.sessionId, section.sessionId)));
+		if (current) {
+			await tx.update(classTeachers).set({ teacherUserId, attendanceTime }).where(eq(classTeachers.id, current.id));
+		} else {
+			await tx.insert(classTeachers).values({
+				schoolId,
+				sectionId: section.id,
+				sessionId: section.sessionId,
+				teacherUserId,
+				attendanceTime
+			});
+		}
+		let [subject] = await tx
+			.select()
+			.from(subjects)
+			.where(and(eq(subjects.schoolId, schoolId), eq(subjects.code, 'general')))
+			.limit(1);
+		if (!subject) {
+			[subject] = await tx.insert(subjects).values({ schoolId, name: 'General', code: 'general' }).returning();
+		}
+		const [assigned] = await tx
+			.select({ id: teacherAssignments.id })
+			.from(teacherAssignments)
+			.where(
+				and(
+					eq(teacherAssignments.schoolId, schoolId),
+					eq(teacherAssignments.teacherUserId, teacherUserId),
+					eq(teacherAssignments.sectionId, section.id),
+					eq(teacherAssignments.subjectId, subject.id)
+				)
+			);
+		if (!assigned) {
+			await tx.insert(teacherAssignments).values({
+				schoolId,
+				teacherUserId,
+				sectionId: section.id,
+				subjectId: subject.id,
+				sessionId: section.sessionId
+			});
+		}
+	});
 }
 
 export async function addClassStudent(

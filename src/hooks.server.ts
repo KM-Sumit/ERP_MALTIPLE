@@ -30,7 +30,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 		event.locals.userId = session.userId;
 		event.locals.fullName = session.fullName;
 		event.locals.isPlatformAdmin = session.isPlatformAdmin;
-		if (session.schoolId && !session.isPlatformAdmin) {
+		if (session.schoolId) {
 			const schools = await accountSchools(db, token);
 			const current = schools.find(
 				(school) =>

@@ -4,7 +4,8 @@ import {
 	academicCatalog,
 	addAcademicStructure,
 	addSessionStudent,
-	addSessionTimetable
+	addSessionTimetable,
+	updateAcademicSession
 } from '#lib/server/schools/service';
 import { actionError } from '#lib/server/http/action';
 import { getDb } from '#lib/server/db';
@@ -36,6 +37,22 @@ export const actions: Actions = {
 				subjectCode: String(form.get('subjectCode') ?? '')
 			});
 			return { saved: 'Academic structure saved.' };
+		} catch (cause) {
+			return actionError(cause);
+		}
+	},
+	session: async ({ request, locals }) => {
+		const form = await request.formData();
+		const sessionId = String(form.get('sessionId') ?? '');
+		try {
+			await updateAcademicSession(getDb(), locals.userId!, locals.schoolId!, {
+				sessionId,
+				name: String(form.get('sessionName') ?? ''),
+				startDate: String(form.get('startDate') ?? ''),
+				endDate: String(form.get('endDate') ?? ''),
+				status: String(form.get('status') ?? '')
+			});
+			return { saved: 'Session updated.', sessionId };
 		} catch (cause) {
 			return actionError(cause);
 		}

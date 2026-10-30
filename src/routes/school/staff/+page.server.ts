@@ -2,7 +2,9 @@ import { error } from '@sveltejs/kit';
 import { teacherRoster } from '#lib/server/schools/directory';
 import { ASSIGNABLE_PERMISSIONS } from '#lib/permissions';
 import {
+	assignClassTeacher,
 	assignManagerPermissions,
+	classBoard,
 	inviteStaff,
 	listStaff,
 	setMembershipStatus
@@ -15,14 +17,28 @@ export const load: PageServerLoad = async ({ locals }) => {
 	const allowed = ['users.manage', 'school.members.manage', 'roles.assign'];
 	if (!allowed.some((key) => locals.permissions.includes(key)))
 		error(403, 'Staff management is not available.');
-	const [staff, teachers] = await Promise.all([
+	const [staff, teachers, board] = await Promise.all([
 		listStaff(getDb(), locals.userId!, locals.schoolId!),
-		teacherRoster(getDb(), locals.userId!, locals.schoolId!)
+		teacherRoster(getDb(), locals.userId!, locals.schoolId!),
+		classBoard(getDb(), locals.userId!, locals.schoolId!)
 	]);
-	return { ...staff, teachers, permissions: ASSIGNABLE_PERMISSIONS };
+	return { ...staff, teachers, sessions: board.sessions, classes: board.classes, permissions: ASSIGNABLE_PERMISSIONS };
 };
 
 export const actions: Actions = {
+	assign: async ({ request, locals }) => {
+		const form = await request.formData();
+		try {
+			await assignClassTeacher(getDb(), locals.userId!, locals.schoolId!, {
+				classId: String(form.get('classId') ?? ''),
+				teacherUserId: String(form.get('teacherUserId') ?? ''),
+				attendanceTime: String(form.get('attendanceTime') ?? '')
+			});
+			return { saved: 'Class teacher assigned. Attendance time is saved.' };
+		} catch (error) {
+			return actionError(error);
+		}
+	},
 	invite: async ({ request, locals }) => {
 		const form = await request.formData();
 		try {
